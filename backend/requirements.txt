@@ -1,0 +1,43 @@
+# ===== CORE DEPENDENCIES =====
+# Web Framework & API
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+
+# File Uploads (required for FastAPI file handling)
+python-multipart>=0.0.6
+
+# Data Processing
+numpy>=1.24.0
+
+# ===== AI/ML DEPENDENCIES (Face Recognition) =====
+# PyTorch (CPU version - change to GPU version if needed)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Face recognition models
+insightface>=0.7.3
+ultralytics>=8.0.0  # For YOLO face detection
+
+# Computer vision
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# ===== GPU SUPPORT (Optional - uncomment if you have CUDA GPU) =====
+# For GPU acceleration, uncomment these and comment out CPU versions above:
+# torch==2.0.1+cu118 --index-url https://download.pytorch.org/whl/cu118
+# torchvision==0.15.2+cu118 --index-url https://download.pytorch.org/whl/cu118
+
+# ===== DEVELOPMENT DEPENDENCIES =====
+# Testing
+pytest>=7.4.0
+
+# Code formatting & linting
+black>=23.0.0
+flake8>=6.0.0
+
+# ===== NOTES =====
+# - All dependencies are pinned to minimum versions for compatibility
+# - CPU versions work on all systems, GPU versions require CUDA
+# - First run may download AI models (~500MB), ensure stable internet
+# - System requires ~2GB free disk space for AI models

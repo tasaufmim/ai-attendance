@@ -1,0 +1,192 @@
+# ===== PYTHON =====
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# ===== NODE.JS =====
+# Dependencies
+node_modules/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Testing
+/coverage
+
+# Next.js
+.next/
+/out/
+
+# Production builds
+/build
+dist/
+
+# TypeScript (Next.js specific)
+*.tsbuildinfo
+next-env.d.ts
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ===== AI/ML =====
+# Downloaded AI models (YOLO, InsightFace, etc.)
+models/
+*.pt
+*.pth
+*.onnx
+*.pb
+*.tflite
+face_database.pkl
+
+# ===== DATABASE =====
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== IDEs =====
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ===== OS =====
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ===== LOGS =====
+*.log
+logs/
+
+# ===== ENVIRONMENT =====
+# Environment files (keep .env.example if you have one)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ===== DEPLOYMENT =====
+# Vercel
+.vercel
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+
+# ===== TEMPORARY FILES =====
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# ===== SENSITIVE DATA =====
+# API keys, secrets, etc.
+secrets/
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+
+# ===== BUILD ARTIFACTS =====
+# Compiled binaries
+*.exe
+*.dll
+*.so
+*.dylib
