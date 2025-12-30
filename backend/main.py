@@ -10,7 +10,7 @@ import sys
 import os
 
 # AI service integration (commented out for demo)
-# sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'ai-service'))
+# sys.path.append(os.path.join(os.path.dirname(__file__), 'ai-service'))
 # from face_recognition import get_face_service
 
 app = FastAPI(title="AI Attendance System", version="1.0.0")
@@ -184,7 +184,7 @@ async def delete_student(student_id: int):
         face_service.known_faces.pop(student_id, None)
         face_service.face_names.pop(student_id, None)
         # Save updated database
-        face_service.save_database('../ai-service/face_database.pkl')
+        face_service.save_database('./ai-service/face_database.pkl')
     except Exception as e:
         print(f"Warning: Could not remove face data for student {student_id}: {e}")
 
