@@ -42,7 +42,7 @@ export default function AdminPage() {
 
   const fetchStudents = async () => {
     try {
-      const response = await fetch('http://localhost:8000/students/');
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/students/`);
       if (response.ok) {
         const data = await response.json();
         setStudents(data.students);
@@ -54,7 +54,7 @@ export default function AdminPage() {
 
   const fetchAttendance = async () => {
     try {
-      const response = await fetch('http://localhost:8000/attendance/');
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/attendance/`);
       if (response.ok) {
         const data = await response.json();
         setAttendanceRecords(data.attendance);
@@ -72,7 +72,7 @@ export default function AdminPage() {
 
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/students/', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/students/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -119,7 +119,7 @@ export default function AdminPage() {
         formData.append('files', selectedFiles[i]);
       }
 
-      const response = await fetch(`http://localhost:8000/students/${selectedStudentId}/photos`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/students/${selectedStudentId}/photos`, {
         method: 'POST',
         body: formData,
       });
@@ -158,7 +158,7 @@ export default function AdminPage() {
 
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:8000/students/${studentId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/students/${studentId}`, {
         method: 'DELETE',
       });
 
@@ -190,7 +190,7 @@ export default function AdminPage() {
 
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/attendance/clear-all', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/attendance/clear-all`, {
         method: 'DELETE',
       });
 
@@ -222,7 +222,7 @@ export default function AdminPage() {
 
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:8000/attendance/${selectedStudentForClearance}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/attendance/${selectedStudentForClearance}`, {
         method: 'DELETE',
       });
 

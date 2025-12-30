@@ -45,7 +45,7 @@ export default function Home() {
         const formData = new FormData();
         formData.append('file', blob, 'capture.jpg');
 
-        const result = await fetch('http://localhost:8000/recognize', {
+        const result = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/recognize`, {
           method: 'POST',
           body: formData,
         });
@@ -98,7 +98,7 @@ export default function Home() {
 
   const fetchAttendanceRecords = async () => {
     try {
-      const response = await fetch('http://localhost:8000/attendance/');
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/attendance/`);
       if (response.ok) {
         const data = await response.json();
         setAttendanceRecords(data.attendance);
