@@ -18,7 +18,13 @@ app = FastAPI(title="AI Attendance System", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://ai-attendance.vercel.app", "*"],
+    allow_origins=[
+        "http://localhost:3000",           # Local development
+        "https://ai-attendance.vercel.app", # Vercel production
+        "https://*.hf.space",              # Hugging Face Spaces
+        "https://huggingface.co",          # Hugging Face main site
+        "*"                                # Allow all for demo
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
