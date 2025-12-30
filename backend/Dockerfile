@@ -45,11 +45,8 @@ WORKDIR /app
 # Copy installed dependencies from builder stage
 COPY --from=builder /root/.local /home/app/.local
 
-# Copy backend application code
-COPY backend/ .
-
-# Copy AI service
-COPY ai-service/ ./ai-service/
+# Copy backend application code (including ai-service)
+COPY . .
 
 # Change ownership to app user
 RUN chown -R app:app /app
