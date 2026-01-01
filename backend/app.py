@@ -233,6 +233,6 @@ async def mark_attendance(attendance: AttendanceRecord):
 
 if __name__ == "__main__":
     import os
-    # Cloud Run provides PORT environment variable, default to 8080
-    port = int(os.environ.get("PORT", 8080))
+    # Spaces provides PORT environment variable, default to 7860
+    port = int(os.environ.get("PORT", 7860))
     uvicorn.run(app, host="0.0.0.0", port=port)
