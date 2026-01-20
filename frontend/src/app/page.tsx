@@ -11,6 +11,14 @@ interface RecognitionResult {
   student_name: string | null;
   confidence: number;
   recognized: boolean;
+  bbox?: number[];
+}
+
+interface BBox {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
 }
 
 export default function Home() {
@@ -19,7 +27,10 @@ export default function Home() {
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
   const [lastAttendance, setLastAttendance] = useState<{student: string, time: string, date: string} | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [boundingBoxes, setBoundingBoxes] = useState<BBox[]>([]);
+  const [faceLabels, setFaceLabels] = useState<{name: string, bbox: BBox, recognized: boolean}[]>([]);
   const webcamRef = useRef<Webcam>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const stopRecognition = () => {
@@ -27,6 +38,81 @@ export default function Home() {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+  };
+
+  const drawBoundingBoxes = (faces: {name: string, bbox: BBox, recognized: boolean}[]) => {
+    console.log('drawBoundingBoxes called with:', faces); // Debug: function called
+
+    const canvas = canvasRef.current;
+    const video = webcamRef.current?.video;
+    if (!canvas || !video) {
+      console.log('Canvas or video not available', { canvas: !!canvas, video: !!video }); // Debug: missing elements
+      return;
+    }
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      console.log('Could not get canvas context'); // Debug: no context
+      return;
+    }
+
+    // Get video element's actual display size and position
+    const videoRect = video.getBoundingClientRect();
+    const canvasRect = canvas.getBoundingClientRect();
+
+    console.log('Video rect:', videoRect); // Debug: video dimensions
+    console.log('Canvas rect:', canvasRect); // Debug: canvas dimensions
+
+    // Calculate scaling factors
+    const scaleX = videoRect.width / 640;  // Original capture width
+    const scaleY = videoRect.height / 480; // Original capture height
+
+    console.log('Scale factors:', { scaleX, scaleY }); // Debug: scaling
+
+    // Calculate offset to align canvas with video
+    const offsetX = videoRect.left - canvasRect.left;
+    const offsetY = videoRect.top - canvasRect.top;
+
+    console.log('Offsets:', { offsetX, offsetY }); // Debug: offsets
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw each bounding box with proper scaling
+    faces.forEach((face, index) => {
+      const { bbox, recognized, name } = face;
+
+      console.log(`Drawing face ${index}:`, { bbox, recognized, name }); // Debug: face data
+
+      // Scale bbox coordinates to match displayed video size
+      const scaledX1 = bbox.x1 * scaleX + offsetX;
+      const scaledY1 = bbox.y1 * scaleY + offsetY;
+      const scaledX2 = bbox.x2 * scaleX + offsetX;
+      const scaledY2 = bbox.y2 * scaleY + offsetY;
+
+      console.log('Scaled coordinates:', { scaledX1, scaledY1, scaledX2, scaledY2 }); // Debug: scaled coords
+
+      // Set color based on recognition status
+      ctx.strokeStyle = recognized ? '#10B981' : '#EF4444'; // Green for recognized, red for unknown
+      ctx.lineWidth = 3;
+      ctx.strokeRect(scaledX1, scaledY1, scaledX2 - scaledX1, scaledY2 - scaledY1);
+
+      // Draw background for text
+      const text = recognized ? name : 'Unknown';
+      ctx.font = '16px Arial';
+      const textWidth = ctx.measureText(text).width;
+      const textHeight = 20;
+
+      ctx.fillStyle = recognized ? '#10B981' : '#EF4444';
+      ctx.fillRect(scaledX1, scaledY1 - textHeight - 5, textWidth + 10, textHeight + 5);
+
+      // Draw text
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 16px Arial';
+      ctx.fillText(text, scaledX1 + 5, scaledY1 - 5);
+
+      console.log(`Drew bounding box for ${text}`); // Debug: drawing complete
+    });
   };
 
   const startContinuousRecognition = useCallback(() => {
@@ -52,7 +138,28 @@ export default function Home() {
 
         if (result.ok) {
           const data: RecognitionResult = await result.json();
+          console.log('API Response:', data); // Debug: log full response
           setRecognitionResult(data);
+
+          // Draw bounding box if available
+          if (data.bbox) {
+            console.log('Drawing bbox:', data.bbox); // Debug: log bbox data
+            const bbox: BBox = {
+              x1: data.bbox[0],
+              y1: data.bbox[1],
+              x2: data.bbox[2],
+              y2: data.bbox[3]
+            };
+            const faces = [{
+              name: data.student_name || 'Unknown',
+              bbox,
+              recognized: data.recognized
+            }];
+            console.log('Calling drawBoundingBoxes with:', faces); // Debug: log what we're drawing
+            drawBoundingBoxes(faces);
+          } else {
+            console.log('No bbox data in response'); // Debug: no bbox case
+          }
 
           if (data.recognized && data.student_name) {
             // Stop continuous recognition after successful attendance
@@ -82,12 +189,17 @@ export default function Home() {
               setShowSuccess(false);
               setIsProcessing(false);
               setRecognitionResult(null);
+              // Keep bounding boxes visible for next recognition
             }, 5000);
           } else if (data.confidence > 0) {
             // Show "face detected but not recognized" briefly
             setTimeout(() => {
               setRecognitionResult(null);
+              // Keep bounding boxes visible for next recognition
             }, 3000);
+          } else {
+            // No face detected, keep boxes visible for next recognition
+            // Don't clear boxes here
           }
         }
       } catch (error) {
@@ -107,6 +219,32 @@ export default function Home() {
       console.error('Error fetching attendance:', error);
     }
   };
+
+  // Resize canvas to match video dimensions
+  useEffect(() => {
+    const resizeCanvas = () => {
+      const video = webcamRef.current?.video;
+      const canvas = canvasRef.current;
+      if (video && canvas) {
+        const rect = video.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+      }
+    };
+
+    // Resize on mount and when video loads
+    if (webcamRef.current?.video) {
+      webcamRef.current.video.addEventListener('loadedmetadata', resizeCanvas);
+      resizeCanvas();
+    }
+
+    // Cleanup
+    return () => {
+      if (webcamRef.current?.video) {
+        webcamRef.current.video.removeEventListener('loadedmetadata', resizeCanvas);
+      }
+    };
+  }, []);
 
   // Start continuous recognition when component mounts
   useEffect(() => {
@@ -169,6 +307,13 @@ export default function Home() {
                   screenshotFormat="image/jpeg"
                   videoConstraints={videoConstraints}
                   className="w-full rounded-lg border-2 border-gray-200"
+                />
+                <canvas
+                  ref={canvasRef}
+                  className="absolute top-0 left-0 pointer-events-none"
+                  width={640}
+                  height={480}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
 
                 {/* Processing Overlay */}

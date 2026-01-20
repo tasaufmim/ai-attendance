@@ -17,7 +17,8 @@ torchvision>=0.15.0 --index-url https://download.pytorch.org/whl/cpu
 
 # Face recognition models
 insightface>=0.7.3
-ultralytics>=8.0.0  # For YOLO face detection
+ultralytics>=8.0.0  # For YOLOv8 face detection (standard model)
+# mediapipe>=0.10.0  # For face detection (alternative)
 
 # Computer vision
 opencv-python>=4.8.0

@@ -18,7 +18,7 @@ class FaceRecognitionService:
         try:
             # Initialize face detector (YOLOv8)
             print("Loading YOLOv8 face detector...")
-            self.face_detector = YOLO('yolov8n-face.pt')  # Will download automatically
+            self.face_detector = YOLO('yolov8n.pt')  # Standard model, auto-downloads
 
             # Initialize face recognition model (ArcFace)
             print("Loading InsightFace ArcFace model...")
@@ -48,7 +48,7 @@ class FaceRecognitionService:
 
     def detect_faces(self, image: np.ndarray) -> List[Dict]:
         """
-        Detect faces in an image using YOLOv8
+        Detect faces in an image using YOLOv8 (following article approach)
 
         Args:
             image: Input image as numpy array (BGR format)
@@ -67,20 +67,87 @@ class FaceRecognitionService:
             }]
             return faces
 
-        results = self.face_detector(image, conf=0.5)
+        # Run YOLOv8 inference
+        results = self.face_detector(image, conf=0.3, iou=0.5)  # Lower confidence for face detection
 
         faces = []
+        h, w = image.shape[:2]
+
         for result in results:
             boxes = result.boxes
-            for box in boxes:
-                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                confidence = box.conf[0].cpu().numpy()
+            if boxes is not None:
+                for box in boxes:
+                    # Get bounding box coordinates
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    confidence = box.conf[0].cpu().numpy()
+                    class_id = int(box.cls[0].cpu().numpy())
 
-                faces.append({
-                    'bbox': [int(x1), int(y1), int(x2), int(y2)],
-                    'confidence': float(confidence),
-                    'class': int(box.cls[0].cpu().numpy())
-                })
+                    # Convert to integers
+                    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+
+                    # For person detections, estimate face region proportionally
+                    if class_id == 0:  # Person class
+                        # Estimate face dimensions based on human proportions
+                        person_width = x2 - x1
+                        person_height = y2 - y1
+
+                        # Face height is typically larger - using 3x the proportional size
+                        face_height = max(80, int((person_height * 3) / 7))  # 3x taller
+
+                        # Face width is about 0.8 times face height (proportional)
+                        face_width = int(face_height * 0.8)
+
+                        # Face starts about 1/20 down from person top
+                        face_y_start = y1 + int(person_height / 20)
+
+                        # Face is horizontally centered
+                        face_x_center = (x1 + x2) // 2
+                        face_x1 = max(x1, face_x_center - face_width // 2)
+                        face_x2 = min(x2, face_x_center + face_width // 2)
+
+                        # Ensure face bbox is within person bbox
+                        face_y2 = min(y2, face_y_start + face_height)
+
+                        faces.append({
+                            'bbox': [face_x1, face_y_start, face_x2, face_y2],  # Estimated face region
+                            'confidence': float(confidence),
+                            'class': class_id
+                        })
+                    else:
+                        # For non-person detections, apply size/aspect filtering
+                        face_width = x2 - x1
+                        face_height = y2 - y1
+                        aspect_ratio = face_width / max(face_height, 1)
+
+                        # Stricter filtering for non-person objects
+                        if (face_width > 80 and face_width < 300 and  # Reasonable face width
+                            face_height > 80 and face_height < 300 and  # Reasonable face height
+                            aspect_ratio > 0.6 and aspect_ratio < 1.8 and  # Face-like aspect ratio
+                            y1 < h * 0.7):  # Not too low in image
+
+                            faces.append({
+                                'bbox': [x1, y1, x2, y2],
+                                'confidence': float(confidence),
+                                'class': class_id
+                            })
+
+        # If no faces detected with filtering, return top detections as fallback
+        if not faces and results:
+            for result in results:
+                boxes = result.boxes
+                if boxes is not None:
+                    # Take the highest confidence detection as potential face
+                    box = boxes[0]  # Best detection
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    confidence = box.conf[0].cpu().numpy()
+                    class_id = int(box.cls[0].cpu().numpy())
+
+                    faces.append({
+                        'bbox': [int(x1), int(y1), int(x2), int(y2)],
+                        'confidence': float(confidence),
+                        'class': class_id
+                    })
+                    break  # Only take one fallback detection
 
         return faces
 
