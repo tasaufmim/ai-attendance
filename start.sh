@@ -29,7 +29,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 echo "⚡ Starting FastAPI server..."
-python3 main.py &
+PORT=8000 python3 app.py &
 BACKEND_PID=$!
 
 cd ..
