@@ -489,13 +489,32 @@ export default function AdminPage() {
                   </div>
                 )}
 
-                <Button
-                  onClick={uploadStudentPhotos}
-                  disabled={isLoading || !selectedStudentId || !selectedFiles || !modelsLoaded}
-                  className="w-full"
-                >
-                  {isLoading ? 'Processing...' : !modelsLoaded ? 'Loading AI Models...' : 'Upload & Register Face'}
-                </Button>
+                <div className="flex gap-3">
+                  <Button
+                    onClick={uploadStudentPhotos}
+                    disabled={isLoading || !selectedStudentId || !selectedFiles || !modelsLoaded}
+                    className="flex-1"
+                  >
+                    {isLoading ? 'Processing...' : !modelsLoaded ? 'Loading AI Models...' : 'Upload & Register Face'}
+                  </Button>
+
+                  <Button
+                    onClick={() => {
+                      if (!selectedStudentId) {
+                        showMessage('error', 'Please select a student first');
+                        return;
+                      }
+                      // Navigate to face registration page with student ID
+                      window.location.href = `/face-recognition?studentId=${selectedStudentId}`;
+                    }}
+                    disabled={!selectedStudentId}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    <Camera className="w-4 h-4 mr-2" />
+                    Open Camera
+                  </Button>
+                </div>
               </CardContent>
             </Card>
 
