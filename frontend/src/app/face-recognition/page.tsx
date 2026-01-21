@@ -23,7 +23,7 @@ function FaceRecognitionContent() {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [showFaceRegistration, setShowFaceRegistration] = useState(false);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://tasauf-ai-attendance.hf.space';
 
   // Check if this is student registration mode (from admin panel)
   const studentId = searchParams.get('studentId');
