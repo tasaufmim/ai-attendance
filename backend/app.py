@@ -130,22 +130,23 @@ async def recognize_face(file: UploadFile = File(...)):
         faces = face_service.detect_faces(image_np)
         bbox = faces[0]['bbox'] if faces else None
 
-        # Create display bbox (tighter for better visuals)
+        # Create display bbox (asymmetric margins for better face positioning)
         display_bbox = None
         if bbox:
-            # Make display bbox tighter - reduce margins for clearer visuals
+            # Use asymmetric margins: less cut from top, more from bottom
             x1, y1, x2, y2 = bbox
             width = x2 - x1
             height = y2 - y1
 
-            # Reduce bbox by 15% on each side for tighter display
-            margin_x = int(width * 0.15)
-            margin_y = int(height * 0.15)
+            # Asymmetric margins for better face positioning
+            top_margin = int(height * 0.05)    # 5% from top (higher position)
+            bottom_margin = int(height * 0.45) # 45% from bottom (smaller height)
+            side_margin = int(width * 0.35)    # 20% from sides (25% wider, better proportion)
 
-            display_x1 = max(0, x1 + margin_x)
-            display_y1 = max(0, y1 + margin_y)
-            display_x2 = x2 - margin_x
-            display_y2 = y2 - margin_y
+            display_x1 = max(0, x1 + side_margin)
+            display_y1 = max(0, y1 + top_margin)      # Less cut from top
+            display_x2 = x2 - side_margin
+            display_y2 = y2 - bottom_margin            # More cut from bottom
 
             # Ensure minimum size
             if display_x2 > display_x1 and display_y2 > display_y1:
