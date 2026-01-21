@@ -128,7 +128,7 @@ export default function Home() {
 
               try {
                 // Send embedding to backend for recognition
-                const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/recognize-face`, {
+                const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/face/recognize`, {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
