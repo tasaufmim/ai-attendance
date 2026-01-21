@@ -1,8 +1,3 @@
-import cv2
-import numpy as np
-import insightface
-from ultralytics import YOLO
-import torch
 from PIL import Image
 import io
 from typing import List, Tuple, Optional, Dict
@@ -10,272 +5,75 @@ import os
 import pickle
 
 class FaceRecognitionService:
+    """Simplified service - all AI processing now handled by face-api.js in browser"""
+
     def __init__(self):
-        """Initialize the face recognition service with AI models"""
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f"Using device: {self.device}")
+        """Initialize the simplified face recognition service"""
+        print("Face recognition service initialized (face-api.js mode)")
 
-        try:
-            # Initialize face detector (YOLOv8)
-            print("Loading YOLOv8 face detector...")
-            self.face_detector = YOLO('yolov8n.pt')  # Standard model, auto-downloads
-
-            # Initialize face recognition model (ArcFace)
-            print("Loading InsightFace ArcFace model...")
-            self.face_recognizer = insightface.app.FaceAnalysis(
-                name='buffalo_l',  # Use lightweight buffalo model
-                root='./models',
-                providers=['CPUExecutionProvider'] if not torch.cuda.is_available()
-                         else ['CUDAExecutionProvider', 'CPUExecutionProvider']
-            )
-            self.face_recognizer.prepare(ctx_id=0, det_size=(640, 640))
-
-            print("AI models loaded successfully!")
-        except Exception as e:
-            print(f"Warning: Failed to load AI models: {e}")
-            print("Running in demo mode without AI models...")
-            self.face_detector = None
-            self.face_recognizer = None
-
-        # Initialize anti-spoofing model (if available)
-        self.anti_spoofing_model = None  # TODO: Add Silent-FaceNet later
-
-        # Known faces database (embeddings)
-        self.known_faces: Dict[int, np.ndarray] = {}
+        # Face embeddings database (received from frontend)
+        self.known_faces: Dict[int, List[float]] = {}
         self.face_names: Dict[int, str] = {}
 
-        print("Face recognition service initialized successfully!")
+        print("Service ready for face-api.js integration!")
 
-    def detect_faces(self, image: np.ndarray) -> List[Dict]:
+    def register_face_from_embedding(self, student_id: int, student_name: str, embedding: List[float]) -> bool:
         """
-        Detect faces in an image using YOLOv8 (following article approach)
-
-        Args:
-            image: Input image as numpy array (BGR format)
-
-        Returns:
-            List of face dictionaries with bbox, confidence, etc.
-        """
-        if self.face_detector is None:
-            # Demo mode: simulate face detection
-            h, w = image.shape[:2]
-            # Simulate detecting a face in the center
-            faces = [{
-                'bbox': [int(w*0.3), int(h*0.3), int(w*0.7), int(h*0.7)],
-                'confidence': 0.95,
-                'class': 0
-            }]
-            return faces
-
-        # Run YOLOv8 inference
-        results = self.face_detector(image, conf=0.3, iou=0.5)  # Lower confidence for face detection
-
-        faces = []
-        h, w = image.shape[:2]
-
-        for result in results:
-            boxes = result.boxes
-            if boxes is not None:
-                for box in boxes:
-                    # Get bounding box coordinates
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    confidence = box.conf[0].cpu().numpy()
-                    class_id = int(box.cls[0].cpu().numpy())
-
-                    # Convert to integers
-                    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-
-                    # For person detections, use person bbox directly (person detection already gives good face region)
-                    if class_id == 0:  # Person class
-                        # Person bbox is already a good face region - just ensure it's within image bounds
-                        final_bbox = [x1, y1, x2, y2]
-                        final_bbox[0] = max(0, final_bbox[0])                    # x1 >= 0
-                        final_bbox[1] = max(0, final_bbox[1])                    # y1 >= 0
-                        final_bbox[2] = min(w, final_bbox[2])                    # x2 <= image_width
-                        final_bbox[3] = min(h, final_bbox[3])                    # y2 <= image_height
-
-                        # Ensure minimum size
-                        if final_bbox[2] - final_bbox[0] >= 50 and final_bbox[3] - final_bbox[1] >= 50:
-                            print(f"  Person bbox: {final_bbox}")  # Debug: show person bbox
-                            faces.append({
-                                'bbox': final_bbox,  # Person bbox as face region
-                                'confidence': float(confidence),
-                                'class': class_id
-                            })
-                    else:
-                        # For non-person detections, apply size/aspect filtering
-                        face_width = x2 - x1
-                        face_height = y2 - y1
-                        aspect_ratio = face_width / max(face_height, 1)
-
-                        # Stricter filtering for non-person objects
-                        if (face_width > 80 and face_width < 300 and  # Reasonable face width
-                            face_height > 80 and face_height < 300 and  # Reasonable face height
-                            aspect_ratio > 0.6 and aspect_ratio < 1.8 and  # Face-like aspect ratio
-                            y1 < h * 0.7):  # Not too low in image
-
-                            faces.append({
-                                'bbox': [x1, y1, x2, y2],
-                                'confidence': float(confidence),
-                                'class': class_id
-                            })
-
-        # If no faces detected with filtering, return top detections as fallback
-        if not faces and results:
-            for result in results:
-                boxes = result.boxes
-                if boxes is not None:
-                    # Take the highest confidence detection as potential face
-                    box = boxes[0]  # Best detection
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    confidence = box.conf[0].cpu().numpy()
-                    class_id = int(box.cls[0].cpu().numpy())
-
-                    faces.append({
-                        'bbox': [int(x1), int(y1), int(x2), int(y2)],
-                        'confidence': float(confidence),
-                        'class': class_id
-                    })
-                    break  # Only take one fallback detection
-
-        return faces
-
-    def extract_embedding(self, image: np.ndarray, bbox: List[int]) -> Optional[np.ndarray]:
-        """
-        Extract face embedding from a detected face
-
-        Args:
-            image: Input image as numpy array (BGR format)
-            bbox: Face bounding box [x1, y1, x2, y2]
-
-        Returns:
-            Face embedding vector (512D) or None if extraction fails
-        """
-        if self.face_recognizer is None:
-            # Demo mode: generate a mock embedding
-            return np.random.rand(512).astype(np.float32)
-
-        try:
-            # Crop face from image
-            x1, y1, x2, y2 = bbox
-            face_crop = image[y1:y2, x1:x2]
-
-            if face_crop.size == 0:
-                return None
-
-            # Convert to RGB for InsightFace
-            face_rgb = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
-
-            # Get face features
-            faces = self.face_recognizer.get(face_rgb)
-
-            if len(faces) > 0:
-                # Return the first face's embedding
-                return faces[0].embedding
-            else:
-                return None
-
-        except Exception as e:
-            print(f"Error extracting embedding: {e}")
-            return None
-
-    def register_face(self, student_id: int, student_name: str, face_images: List[np.ndarray]) -> bool:
-        """
-        Register a student's face by computing average embedding from multiple photos
+        Register a student's face using embedding from face-api.js
 
         Args:
             student_id: Unique student identifier
             student_name: Student name
-            face_images: List of face images (numpy arrays)
+            embedding: Face embedding from face-api.js
 
         Returns:
-            True if registration successful, False otherwise
+            True if registration successful
         """
-        embeddings = []
-        total_images = len(face_images)
-
-        print(f"Starting face registration for student {student_name} (ID: {student_id}) with {total_images} photos")
-
-        for i, image in enumerate(face_images, 1):
-            print(f"Processing photo {i}/{total_images} for student {student_id}...")
-
-            # Detect faces
-            faces = self.detect_faces(image)
-            print(f"  Detected faces: {len(faces)}")
-
-            if len(faces) == 1:
-                print(f"  Single face detected, bbox: {faces[0]['bbox']}")
-                # Extract embedding
-                embedding = self.extract_embedding(image, faces[0]['bbox'])
-                if embedding is not None:
-                    embeddings.append(embedding)
-                    print(f"  Embedding extracted successfully")
-                else:
-                    print(f"  Embedding extraction failed")
-            elif len(faces) > 1:
-                print(f"  Multiple faces detected ({len(faces)}), skipping this photo")
-                continue
-            else:
-                print(f"  No faces detected, skipping this photo")
-                continue
-
-        print(f"Registration summary for student {student_id}: {len(embeddings)}/{total_images} photos processed successfully")
-
-        if len(embeddings) >= 3:  # Require at least 3 good photos
-            # Compute average embedding
-            avg_embedding = np.mean(embeddings, axis=0)
-            avg_embedding = avg_embedding / np.linalg.norm(avg_embedding)  # L2 normalize
-
-            # Store in database
-            self.known_faces[student_id] = avg_embedding
+        try:
+            # Store the embedding
+            self.known_faces[student_id] = embedding
             self.face_names[student_id] = student_name
 
-            print(f"Successfully registered student {student_name} (ID: {student_id}) with {len(embeddings)} photos")
+            print(f"Successfully registered student {student_name} (ID: {student_id})")
             return True
-        else:
-            print(f"Registration failed for student {student_id}. Got {len(embeddings)} valid photos, need at least 3.")
+        except Exception as e:
+            print(f"Registration failed: {e}")
             return False
 
-    def recognize_face(self, image: np.ndarray, threshold: float = 0.6) -> Tuple[Optional[int], Optional[str], float]:
+    def recognize_face_from_embedding(self, embedding: List[float], threshold: float = 0.6) -> Tuple[Optional[int], Optional[str], float]:
         """
-        Recognize a face in an image
+        Recognize a face using embedding from face-api.js
 
         Args:
-            image: Input image as numpy array (BGR format)
-            threshold: Similarity threshold for recognition
+            embedding: Face embedding from face-api.js
+            threshold: Similarity threshold
 
         Returns:
-            Tuple of (student_id, student_name, confidence) or (None, None, confidence) if not recognized
+            Tuple of (student_id, student_name, confidence)
         """
-        # Detect faces
-        faces = self.detect_faces(image)
+        try:
+            best_match_id = None
+            best_similarity = 0.0
 
-        if len(faces) != 1:
+            # Compare with known faces using Euclidean distance
+            for student_id, known_embedding in self.known_faces.items():
+                # Calculate Euclidean distance
+                distance = sum((a - b) ** 2 for a, b in zip(embedding, known_embedding)) ** 0.5
+                # Convert to similarity (higher = more similar)
+                similarity = 1 / (1 + distance)
+
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_match_id = student_id
+
+            if best_similarity >= threshold:
+                return best_match_id, self.face_names.get(best_match_id), best_similarity
+            else:
+                return None, None, best_similarity
+
+        except Exception as e:
+            print(f"Recognition failed: {e}")
             return None, None, 0.0
-
-        # Extract embedding
-        embedding = self.extract_embedding(image, faces[0]['bbox'])
-
-        if embedding is None:
-            return None, None, 0.0
-
-        # Normalize embedding
-        embedding = embedding / np.linalg.norm(embedding)
-
-        # Compare with known faces
-        best_match_id = None
-        best_similarity = 0.0
-
-        for student_id, known_embedding in self.known_faces.items():
-            similarity = np.dot(embedding, known_embedding)  # Cosine similarity
-            if similarity > best_similarity:
-                best_similarity = similarity
-                best_match_id = student_id
-
-        if best_similarity >= threshold:
-            return best_match_id, self.face_names.get(best_match_id), best_similarity
-        else:
-            return None, None, best_similarity
 
     def save_database(self, filepath: str = 'face_database.pkl'):
         """Save the face database to disk"""
@@ -298,18 +96,9 @@ class FaceRecognitionService:
         else:
             print(f"Database file {filepath} not found")
 
-    def process_image_from_bytes(self, image_bytes: bytes) -> np.ndarray:
-        """Convert image bytes to numpy array"""
-        image = Image.open(io.BytesIO(image_bytes))
-        return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-
-    def is_live_face(self, image: np.ndarray, bbox: List[int]) -> bool:
-        """
-        Check if face is live (anti-spoofing)
-        TODO: Implement with Silent-FaceNet or similar
-        """
-        # For now, always return True
-        return True
+    def process_image_from_bytes(self, image_bytes: bytes) -> Image.Image:
+        """Convert image bytes to PIL Image (for basic operations only)"""
+        return Image.open(io.BytesIO(image_bytes))
 
 # Global service instance
 face_service = FaceRecognitionService()

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import * as faceapi from 'face-api.js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,8 @@ export default function AdminPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [showLandmarks, setShowLandmarks] = useState(true);
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
 
   // New student form
@@ -112,16 +115,80 @@ export default function AdminPage() {
       return;
     }
 
+    if (!modelsLoaded) {
+      showMessage('error', 'AI models are still loading. Please wait.');
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const formData = new FormData();
+      const embeddings: Float32Array[] = [];
+
+      // Process each uploaded photo with face-api.js
       for (let i = 0; i < selectedFiles.length; i++) {
-        formData.append('files', selectedFiles[i]);
+        const file = selectedFiles[i];
+        console.log(`Processing photo ${i + 1}/${selectedFiles.length}: ${file.name}`);
+
+        // Convert file to HTMLImageElement
+        const img = new Image();
+        const imageUrl = URL.createObjectURL(file);
+
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = imageUrl;
+        });
+
+        // Detect face and extract embedding
+        const detection = await faceapi
+          .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 }))
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        if (detection) {
+          embeddings.push(detection.descriptor);
+          console.log(`Face detected and embedding extracted from ${file.name}`);
+        } else {
+          console.warn(`No face detected in ${file.name}`);
+        }
+
+        // Clean up object URL
+        URL.revokeObjectURL(imageUrl);
       }
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/students/${selectedStudentId}/photos`, {
+      if (embeddings.length === 0) {
+        showMessage('error', 'No faces detected in the uploaded photos. Please ensure photos contain clear faces.');
+        return;
+      }
+
+      if (embeddings.length < 3) {
+        showMessage('error', `Only ${embeddings.length} faces detected. Please upload more photos with clear faces.`);
+        return;
+      }
+
+      // Calculate average embedding from all photos
+      const avgEmbedding = new Array(128).fill(0);
+      for (const embedding of embeddings) {
+        for (let j = 0; j < embedding.length; j++) {
+          avgEmbedding[j] += embedding[j];
+        }
+      }
+      for (let j = 0; j < avgEmbedding.length; j++) {
+        avgEmbedding[j] /= embeddings.length;
+      }
+
+      console.log(`Calculated average embedding from ${embeddings.length} photos`);
+
+      // Send embedding to backend for registration
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/register-face`, {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          student_id: selectedStudentId,
+          embedding: avgEmbedding,
+        }),
       });
 
       if (response.ok) {
@@ -132,13 +199,15 @@ export default function AdminPage() {
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
+        // Refresh students to show updated data
+        fetchStudents();
       } else {
         const error = await response.json();
-        showMessage('error', error.detail || 'Failed to upload photos');
+        showMessage('error', error.detail || 'Failed to register face');
       }
     } catch (error) {
-      console.error('Error uploading photos:', error);
-      showMessage('error', 'Network error. Please try again.');
+      console.error('Error processing photos:', error);
+      showMessage('error', 'Failed to process photos. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -243,8 +312,25 @@ export default function AdminPage() {
     }
   };
 
-  // Load data on component mount
+  // Load face-api.js models and data on component mount
   useEffect(() => {
+    const loadModels = async () => {
+      try {
+        const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/';
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+        ]);
+        setModelsLoaded(true);
+        console.log('Face-API models loaded successfully');
+      } catch (error) {
+        console.error('Error loading face-api models:', error);
+        showMessage('error', 'Failed to load AI models. Please refresh the page.');
+      }
+    };
+
+    loadModels();
     fetchStudents();
     fetchAttendance();
   }, []);
@@ -267,6 +353,25 @@ export default function AdminPage() {
                 Demo System: Data is temporary and will be cleared when the server restarts
               </span>
             </div>
+          </div>
+
+          {/* Face Landmarks Toggle */}
+          <div className="flex justify-center mt-4">
+            <button
+              onClick={() => {
+                const newValue = !showLandmarks;
+                setShowLandmarks(newValue);
+                localStorage.setItem('showFaceLandmarks', newValue.toString());
+                showMessage('success', `Face landmarks ${newValue ? 'enabled' : 'disabled'} for the main camera view`);
+              }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                showLandmarks
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              {showLandmarks ? 'Hide Face Landmarks' : 'Show Face Landmarks'}
+            </button>
           </div>
         </div>
 
@@ -386,10 +491,10 @@ export default function AdminPage() {
 
                 <Button
                   onClick={uploadStudentPhotos}
-                  disabled={isLoading || !selectedStudentId || !selectedFiles}
+                  disabled={isLoading || !selectedStudentId || !selectedFiles || !modelsLoaded}
                   className="w-full"
                 >
-                  {isLoading ? 'Uploading...' : 'Upload & Train AI'}
+                  {isLoading ? 'Processing...' : !modelsLoaded ? 'Loading AI Models...' : 'Upload & Register Face'}
                 </Button>
               </CardContent>
             </Card>

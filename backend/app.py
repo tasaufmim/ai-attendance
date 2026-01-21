@@ -31,30 +31,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pydantic models
+# Pydantic models for face-api.js integration
 class StudentCreate(BaseModel):
     name: str
     roll_number: str
 
-class AttendanceRecord(BaseModel):
+class FaceRegistration(BaseModel):
     student_id: int
-    timestamp: str
-    confidence: float
-    location: Optional[str] = None
+    embedding: List[float]  # Face embedding from face-api.js
+
+class FaceRecognition(BaseModel):
+    embedding: List[float]  # Face embedding from face-api.js
 
 class RecognitionResult(BaseModel):
     student_id: Optional[int] = None
     student_name: Optional[str] = None
     confidence: float
     recognized: bool
-    bbox: Optional[List[int]] = None  # [x1, y1, x2, y2] - for embedding
-    display_bbox: Optional[List[int]] = None  # [x1, y1, x2, y2] - for display
 
-class MultiRecognitionResult(BaseModel):
-    results: List[RecognitionResult]
-    total_faces: int
-    recognized_count: int
-    processing_time: float
+class AttendanceRecord(BaseModel):
+    student_id: int
+    timestamp: str
+    confidence: float
+    location: Optional[str] = None
 
 # In-memory database (will be replaced with MongoDB later)
 students_db = {}
@@ -90,215 +89,65 @@ async def create_student(student: StudentCreate):
     }
     return {"message": "Student created successfully", "student_id": student_id}
 
-@app.post("/students/{student_id}/photos")
-async def upload_student_photos(student_id: int, files: List[UploadFile] = File(...)):
-    """Upload photos for a student to generate embeddings"""
-    if student_id not in students_db:
+@app.post("/register-face")
+async def register_face_embedding(registration: FaceRegistration):
+    """Register a face embedding from face-api.js"""
+    if registration.student_id not in students_db:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    # Convert uploaded files to numpy arrays
-    face_images = []
-    for file in files:
-        try:
-            contents = await file.read()
-            image_np = face_service.process_image_from_bytes(contents)
-            face_images.append(image_np)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error processing image: {str(e)}")
-
-    if len(face_images) < 3:
-        raise HTTPException(status_code=400, detail="At least 3 photos are required for registration")
-
-    # Register face using AI service
-    student_name = students_db[student_id]["name"]
-    success = face_service.register_face(student_id, student_name, face_images)
+    student_name = students_db[registration.student_id]["name"]
+    success = face_service.register_face_from_embedding(
+        registration.student_id,
+        student_name,
+        registration.embedding
+    )
 
     if success:
-        return {"message": f"Successfully registered {len(face_images)} photos for student {student_name}"}
+        return {"message": f"Successfully registered face for student {student_name}"}
     else:
-        raise HTTPException(status_code=400, detail="Face registration failed. Please ensure photos contain clear, single faces.")
+        raise HTTPException(status_code=400, detail="Face registration failed")
 
-@app.post("/recognize", response_model=RecognitionResult)
-async def recognize_face(file: UploadFile = File(...)):
-    """Recognize a face from uploaded image (legacy single-face endpoint)"""
-    try:
-        # Read image
-        contents = await file.read()
-        image_np = face_service.process_image_from_bytes(contents)
+@app.post("/recognize-face", response_model=RecognitionResult)
+async def recognize_face_embedding(recognition: FaceRecognition):
+    """Recognize a face from embedding sent by face-api.js"""
+    student_id, student_name, confidence = face_service.recognize_face_from_embedding(
+        recognition.embedding
+    )
 
-        # Detect faces to get bbox
-        faces = face_service.detect_faces(image_np)
-        bbox = faces[0]['bbox'] if faces else None
+    recognized = student_id is not None
 
-        # Create display bbox (asymmetric margins for better face positioning)
-        display_bbox = None
-        if bbox:
-            # Use asymmetric margins: less cut from top, more from bottom
-            x1, y1, x2, y2 = bbox
-            width = x2 - x1
-            height = y2 - y1
+    # If recognized, mark attendance
+    if recognized:
+        # Check for duplicate attendance (5 minute cooldown)
+        current_time = datetime.now()
+        last_time = last_attendance_times.get(student_id)
 
-            # Asymmetric margins for better face positioning
-            top_margin = int(height * 0.05)    # 5% from top (higher position)
-            bottom_margin = int(height * 0.45) # 45% from bottom (smaller height)
-            side_margin = int(width * 0.35)    # 20% from sides (25% wider, better proportion)
-
-            display_x1 = max(0, x1 + side_margin)
-            display_y1 = max(0, y1 + top_margin)      # Less cut from top
-            display_x2 = x2 - side_margin
-            display_y2 = y2 - bottom_margin            # More cut from bottom
-
-            # Ensure minimum size
-            if display_x2 > display_x1 and display_y2 > display_y1:
-                display_bbox = [display_x1, display_y1, display_x2, display_y2]
-
-        print(f"DEBUG: Detected faces: {len(faces)}, bbox: {bbox}, display_bbox: {display_bbox}")  # Debug: bbox detection
-
-        # Perform recognition (uses the embedding bbox)
-        student_id, student_name, confidence = face_service.recognize_face(image_np)
-        print(f"DEBUG: Recognition result - id: {student_id}, name: {student_name}, conf: {confidence}")  # Debug: recognition result
-
-        if student_id is not None:
-            # Check for duplicate attendance (5 minute cooldown)
-            current_time = datetime.now()
-            last_time = last_attendance_times.get(student_id)
-
-            if last_time and (current_time - last_time).total_seconds() < 300:  # 5 minutes
-                return RecognitionResult(
-                    student_id=student_id,
-                    student_name=student_name,
-                    confidence=confidence,
-                    recognized=True,
-                    bbox=bbox,
-                    display_bbox=display_bbox
-                )
-
-            # Mark attendance automatically
-            timestamp = current_time.isoformat()
-
-            attendance_record = AttendanceRecord(
-                student_id=student_id,
-                timestamp=timestamp,
-                confidence=confidence,
-                location="Webcam"
-            )
-            attendance_db.append(attendance_record.dict())
-            last_attendance_times[student_id] = current_time
-
+        if last_time and (current_time - last_time).total_seconds() < 300:  # 5 minutes
+            # Return result without marking attendance (duplicate)
             return RecognitionResult(
                 student_id=student_id,
                 student_name=student_name,
                 confidence=confidence,
-                recognized=True,
-                bbox=bbox,
-                display_bbox=display_bbox
-            )
-        else:
-            return RecognitionResult(
-                confidence=confidence,
-                recognized=False,
-                bbox=bbox,
-                display_bbox=display_bbox
+                recognized=True
             )
 
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Recognition failed: {str(e)}")
-
-@app.post("/recognize/multi", response_model=MultiRecognitionResult)
-async def recognize_faces_multi(file: UploadFile = File(...)):
-    """Recognize multiple faces from uploaded image"""
-    import time
-    start_time = time.time()
-
-    try:
-        # Read image
-        contents = await file.read()
-        image_np = face_service.process_image_from_bytes(contents)
-
-        # Detect all faces
-        faces = face_service.detect_faces(image_np)
-        total_faces = len(faces)
-
-        results = []
-        recognized_count = 0
-
-        # Process each detected face
-        for face in faces:
-            bbox = face['bbox']
-
-            # Extract embedding for this face
-            embedding = face_service.extract_embedding(image_np, bbox)
-
-            if embedding is None:
-                results.append(RecognitionResult(
-                    confidence=0.0,
-                    recognized=False
-                ))
-                continue
-
-            # Normalize embedding
-            embedding = embedding / np.linalg.norm(embedding)
-
-            # Compare with known faces
-            best_match_id = None
-            best_similarity = 0.0
-
-            for student_id, known_embedding in face_service.known_faces.items():
-                similarity = np.dot(embedding, known_embedding)
-                if similarity > best_similarity:
-                    best_similarity = similarity
-                    best_match_id = student_id
-
-            # Check similarity threshold
-            if best_similarity >= 0.6:  # Same threshold as single recognition
-                student_name = face_service.face_names.get(best_match_id)
-
-                # Check for duplicate attendance (5 minute cooldown)
-                current_time = datetime.now()
-                last_time = last_attendance_times.get(best_match_id)
-
-                should_mark = True
-                if last_time and (current_time - last_time).total_seconds() < 300:  # 5 minutes
-                    should_mark = False
-
-                if should_mark:
-                    # Mark attendance
-                    timestamp = current_time.isoformat()
-                    attendance_record = AttendanceRecord(
-                        student_id=best_match_id,
-                        timestamp=timestamp,
-                        confidence=best_similarity,
-                        location="Webcam"
-                    )
-                    attendance_db.append(attendance_record.dict())
-                    last_attendance_times[best_match_id] = current_time
-
-                results.append(RecognitionResult(
-                    student_id=best_match_id,
-                    student_name=student_name,
-                    confidence=best_similarity,
-                    recognized=True,
-                    bbox=bbox
-                ))
-                recognized_count += 1
-            else:
-                results.append(RecognitionResult(
-                    confidence=best_similarity,
-                    recognized=False,
-                    bbox=bbox
-                ))
-
-        processing_time = time.time() - start_time
-
-        return MultiRecognitionResult(
-            results=results,
-            total_faces=total_faces,
-            recognized_count=recognized_count,
-            processing_time=processing_time
+        # Mark attendance automatically
+        timestamp = current_time.isoformat()
+        attendance_record = AttendanceRecord(
+            student_id=student_id,
+            timestamp=timestamp,
+            confidence=confidence,
+            location="Webcam"
         )
+        attendance_db.append(attendance_record.dict())
+        last_attendance_times[student_id] = current_time
 
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Multi-recognition failed: {str(e)}")
+    return RecognitionResult(
+        student_id=student_id,
+        student_name=student_name,
+        confidence=confidence,
+        recognized=recognized
+    )
 
 @app.get("/attendance/")
 async def get_attendance():

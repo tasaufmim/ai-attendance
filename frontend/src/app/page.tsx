@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import Webcam from 'react-webcam';
+import * as faceapi from 'face-api.js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { AlertCircle, CheckCircle, Camera, Users, FileText } from 'lucide-react';
@@ -11,204 +12,226 @@ interface RecognitionResult {
   student_name: string | null;
   confidence: number;
   recognized: boolean;
-  bbox?: number[];        // For embedding (larger)
-  display_bbox?: number[]; // For display (tighter)
 }
 
-interface BBox {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
+interface Student {
+  id: number;
+  name: string;
+  roll_number: string;
 }
 
 export default function Home() {
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [recognitionResult, setRecognitionResult] = useState<RecognitionResult | null>(null);
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
   const [lastAttendance, setLastAttendance] = useState<{student: string, time: string, date: string} | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [boundingBoxes, setBoundingBoxes] = useState<BBox[]>([]);
-  const [faceLabels, setFaceLabels] = useState<{name: string, bbox: BBox, recognized: boolean}[]>([]);
+  const [showLandmarks, setShowLandmarks] = useState(true);
+
+  // Load landmarks preference from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('showFaceLandmarks');
+    if (saved !== null) {
+      setShowLandmarks(saved === 'true');
+    }
+  }, []);
+  const [labeledDescriptors, setLabeledDescriptors] = useState<faceapi.LabeledFaceDescriptors[]>([]);
+
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const stopRecognition = () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-  };
-
-  const drawBoundingBoxes = (faces: {name: string, bbox: BBox, recognized: boolean}[]) => {
-    console.log('drawBoundingBoxes called with:', faces); // Debug: function called
-
-    const canvas = canvasRef.current;
-    const video = webcamRef.current?.video;
-    if (!canvas || !video) {
-      console.log('Canvas or video not available', { canvas: !!canvas, video: !!video }); // Debug: missing elements
-      return;
-    }
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      console.log('Could not get canvas context'); // Debug: no context
-      return;
-    }
-
-    // Get video element's actual display size and position
-    const videoRect = video.getBoundingClientRect();
-    const canvasRect = canvas.getBoundingClientRect();
-
-    console.log('Video rect:', videoRect); // Debug: video dimensions
-    console.log('Canvas rect:', canvasRect); // Debug: canvas dimensions
-
-    // Calculate scaling factors
-    const scaleX = videoRect.width / 640;  // Original capture width
-    const scaleY = videoRect.height / 480; // Original capture height
-
-    console.log('Scale factors:', { scaleX, scaleY }); // Debug: scaling
-
-    // Calculate offset to align canvas with video
-    const offsetX = videoRect.left - canvasRect.left;
-    const offsetY = videoRect.top - canvasRect.top;
-
-    console.log('Offsets:', { offsetX, offsetY }); // Debug: offsets
-
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Draw each bounding box with proper scaling
-    faces.forEach((face, index) => {
-      const { bbox, recognized, name } = face;
-
-      console.log(`Drawing face ${index}:`, { bbox, recognized, name }); // Debug: face data
-
-      // Scale bbox coordinates to match displayed video size
-      const scaledX1 = bbox.x1 * scaleX + offsetX;
-      const scaledY1 = bbox.y1 * scaleY + offsetY;
-      const scaledX2 = bbox.x2 * scaleX + offsetX;
-      const scaledY2 = bbox.y2 * scaleY + offsetY;
-
-      console.log('Scaled coordinates:', { scaledX1, scaledY1, scaledX2, scaledY2 }); // Debug: scaled coords
-
-      // Set color based on recognition status
-      ctx.strokeStyle = recognized ? '#10B981' : '#EF4444'; // Green for recognized, red for unknown
-      ctx.lineWidth = 3;
-      ctx.strokeRect(scaledX1, scaledY1, scaledX2 - scaledX1, scaledY2 - scaledY1);
-
-      // Draw background for text
-      const text = recognized ? name : 'Unknown';
-      ctx.font = '16px Arial';
-      const textWidth = ctx.measureText(text).width;
-      const textHeight = 20;
-
-      ctx.fillStyle = recognized ? '#10B981' : '#EF4444';
-      ctx.fillRect(scaledX1, scaledY1 - textHeight - 5, textWidth + 10, textHeight + 5);
-
-      // Draw text
-      ctx.fillStyle = 'white';
-      ctx.font = 'bold 16px Arial';
-      ctx.fillText(text, scaledX1 + 5, scaledY1 - 5);
-
-      console.log(`Drew bounding box for ${text}`); // Debug: drawing complete
-    });
-  };
-
-  const startContinuousRecognition = useCallback(() => {
-    intervalRef.current = setInterval(async () => {
-      if (!webcamRef.current) return;
-
+  // Load face-api.js models
+  useEffect(() => {
+    const loadModels = async () => {
       try {
-        const imageSrc = webcamRef.current.getScreenshot();
-        if (!imageSrc) return;
+        // Load models from CDN (more reliable than local files)
+        const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/';
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+          faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL)
+        ]);
+        setModelsLoaded(true);
+        console.log('Face-API models loaded successfully');
+      } catch (error) {
+        console.error('Error loading face-api models:', error);
+      }
+    };
 
-        // Convert base64 to blob
-        const response = await fetch(imageSrc);
-        const blob = await response.blob();
+    loadModels();
+  }, []);
 
-        // Send to backend for recognition
-        const formData = new FormData();
-        formData.append('file', blob, 'capture.jpg');
+  // Load students and create labeled face descriptors
+  const loadStudents = useCallback(async () => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/students/`);
+      if (response.ok) {
+        const data = await response.json();
+        setStudents(data.students);
 
-        const result = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/recognize`, {
-          method: 'POST',
-          body: formData,
-        });
+        // Create labeled descriptors from registered students
+        // In a real app, you'd load pre-computed descriptors from the backend
+        // For now, we'll create them during recognition
+        console.log('Students loaded:', data.students.length);
+      }
+    } catch (error) {
+      console.error('Error loading students:', error);
+    }
+  }, []);
 
-        if (result.ok) {
-          const data: RecognitionResult = await result.json();
-          console.log('API Response:', data); // Debug: log full response
-          setRecognitionResult(data);
+  useEffect(() => {
+    loadStudents();
+  }, [loadStudents]);
 
-          // Draw bounding box if available (prefer display_bbox for visual feedback)
-          const bboxForDisplay = data.display_bbox || data.bbox;
-          if (bboxForDisplay) {
-            console.log('Drawing bbox:', bboxForDisplay, '(display_bbox preferred)'); // Debug: log bbox data
-            const bbox: BBox = {
-              x1: bboxForDisplay[0],
-              y1: bboxForDisplay[1],
-              x2: bboxForDisplay[2],
-              y2: bboxForDisplay[3]
-            };
-            const faces = [{
-              name: data.student_name || 'Unknown',
-              bbox,
-              recognized: data.recognized
-            }];
-            console.log('Calling drawBoundingBoxes with:', faces); // Debug: log what we're drawing
-            drawBoundingBoxes(faces);
-          } else {
-            console.log('No bbox data in response'); // Debug: no bbox case
+  // Face detection and recognition with face-api.js
+  const detectFaces = useCallback(async () => {
+    if (!modelsLoaded || !webcamRef.current?.video) return;
+
+    try {
+      const video = webcamRef.current.video;
+
+      // Detect faces in the video with embeddings
+      const detections = await faceapi
+        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 }))
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+
+      // Draw detections on canvas
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
+        faceapi.matchDimensions(canvas, displaySize);
+
+        const resizedDetections = faceapi.resizeResults(detections, displaySize);
+        const ctx = canvas.getContext('2d');
+
+        if (ctx) {
+          // Clear canvas
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          // Draw face landmarks (conditionally based on user preference)
+          if (showLandmarks) {
+            faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
           }
 
-          if (data.recognized && data.student_name) {
-            // Stop continuous recognition after successful attendance
-            stopRecognition();
+          // Process each detected face for recognition
+          if (detections.length > 0) {
+            // Recognize each face by sending embedding to backend
+            for (let i = 0; i < detections.length; i++) {
+              const detection = detections[i];
+              const embedding = Array.from(detection.descriptor);
 
-            // Mark attendance and show success
-            setIsProcessing(true);
+              try {
+                // Send embedding to backend for recognition
+                const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/recognize-face`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ embedding }),
+                });
 
-            // Set success message with timestamp
-            const now = new Date();
-            const time = now.toLocaleTimeString();
-            const date = now.toLocaleDateString();
+                let label = 'Unknown';
+                let confidence = 0;
+                let isRecognized = false;
 
-            setLastAttendance({
-              student: data.student_name,
-              time: time,
-              date: date
-            });
+                if (response.ok) {
+                  const result = await response.json();
+                  if (result.recognized && result.student_name) {
+                    label = result.student_name;
+                    confidence = result.confidence;
+                    isRecognized = true;
 
-            setShowSuccess(true);
+                    // Mark attendance for recognized faces
+                    if (!isProcessing) {
+                      setIsProcessing(true);
+                      // Show success notification
+                      const now = new Date();
+                      setLastAttendance({
+                        student: result.student_name,
+                        time: now.toLocaleTimeString(),
+                        date: now.toLocaleDateString()
+                      });
+                      setShowSuccess(true);
+                      setRecognitionResult(result);
 
-            // Refresh attendance records
-            fetchAttendanceRecords();
+                      // Refresh attendance records
+                      fetchAttendanceRecords();
 
-            // Hide success message after 5 seconds but don't restart scanning
-            setTimeout(() => {
-              setShowSuccess(false);
-              setIsProcessing(false);
-              setRecognitionResult(null);
-              // Keep bounding boxes visible for next recognition
-            }, 5000);
-          } else if (data.confidence > 0) {
-            // Show "face detected but not recognized" briefly
-            setTimeout(() => {
-              setRecognitionResult(null);
-              // Keep bounding boxes visible for next recognition
-            }, 3000);
-          } else {
-            // No face detected, keep boxes visible for next recognition
-            // Don't clear boxes here
+                      // Hide success after 5 seconds
+                      setTimeout(() => {
+                        setShowSuccess(false);
+                        setIsProcessing(false);
+                      }, 5000);
+                    }
+                  }
+                }
+
+                // Draw recognition result on canvas
+                const box = resizedDetections[i].detection.box;
+                const confidenceText = isRecognized ? ` (${(confidence * 100).toFixed(0)}%)` : '';
+                const text = `${label}${confidenceText}`;
+
+                ctx.strokeStyle = isRecognized ? '#10B981' : '#EF4444';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+                // Draw label background
+                ctx.fillStyle = isRecognized ? '#10B981' : '#EF4444';
+                const textWidth = ctx.measureText(text).width;
+                ctx.fillRect(box.x, box.y - 25, textWidth + 10, 25);
+
+                // Draw label text
+                ctx.fillStyle = 'white';
+                ctx.font = '16px Arial';
+                ctx.fillText(text, box.x + 5, box.y - 5);
+
+              } catch (error) {
+                console.error('Recognition error:', error);
+                // Draw as unknown on error
+                const box = resizedDetections[i].detection.box;
+                const text = 'Unknown';
+
+                ctx.strokeStyle = '#EF4444';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+                ctx.fillStyle = '#EF4444';
+                ctx.fillRect(box.x, box.y - 25, ctx.measureText(text).width + 10, 25);
+
+                ctx.fillStyle = 'white';
+                ctx.font = '16px Arial';
+                ctx.fillText(text, box.x + 5, box.y - 5);
+              }
+            }
           }
         }
-      } catch (error) {
-        console.error('Error during recognition:', error);
       }
-    }, 2000); // Check every 2 seconds
+    } catch (error) {
+      console.error('Face detection error:', error);
+    }
+  }, [modelsLoaded, labeledDescriptors, isProcessing]);
+
+
+
+  // Load labeled face descriptors from backend
+  const loadLabeledDescriptors = useCallback(async () => {
+    // For now, we'll create descriptors during recognition
+    // In a real implementation, you'd load pre-computed descriptors
+    console.log('Face descriptors will be loaded during recognition');
   }, []);
+
+  // Start face detection loop
+  useEffect(() => {
+    if (modelsLoaded) {
+      const interval = setInterval(detectFaces, 100); // 10 FPS detection
+      return () => clearInterval(interval);
+    }
+  }, [modelsLoaded, detectFaces]);
 
   const fetchAttendanceRecords = async () => {
     try {
@@ -248,16 +271,10 @@ export default function Home() {
     };
   }, []);
 
-  // Start continuous recognition when component mounts
+  // Load attendance records on mount
   useEffect(() => {
-    startContinuousRecognition();
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [startContinuousRecognition]);
+    fetchAttendanceRecords();
+  }, []);
 
   const videoConstraints = {
     width: 640,
@@ -276,15 +293,15 @@ export default function Home() {
             Hands-free face recognition attendance tracking
           </p>
           <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full ${
-            intervalRef.current
+            modelsLoaded
               ? 'bg-blue-50 text-blue-700'
               : 'bg-orange-50 text-orange-700'
           }`}>
             <div className={`w-2 h-2 rounded-full animate-pulse ${
-              intervalRef.current ? 'bg-blue-500' : 'bg-orange-500'
+              modelsLoaded ? 'bg-blue-500' : 'bg-orange-500'
             }`}></div>
             <span className="text-sm font-medium">
-              {intervalRef.current ? 'System Active - Scanning for faces' : 'System Paused - Ready to scan'}
+              {modelsLoaded ? 'System Active - Real-time face detection' : 'Loading AI models...'}
             </span>
           </div>
         </div>
@@ -318,28 +335,19 @@ export default function Home() {
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
 
-                {/* Processing Overlay */}
-                {isProcessing && (
-                  <div className="absolute inset-0 bg-black bg-opacity-70 flex items-center justify-center rounded-lg">
-                    <div className="text-white text-center">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-                      <p className="text-lg font-semibold">Processing...</p>
-                      <p className="text-sm opacity-90">Marking attendance</p>
-                    </div>
-                  </div>
-                )}
+                {/* Processing indicator removed - camera feed stays visible */}
 
-                {/* Success Overlay */}
+                {/* Success Notification - Top Right Corner */}
                 {showSuccess && lastAttendance && (
-                  <div className="absolute inset-0 bg-green-500 bg-opacity-90 flex items-center justify-center rounded-lg">
-                    <div className="text-white text-center">
-                      <CheckCircle className="w-16 h-16 mx-auto mb-4" />
-                      <h3 className="text-2xl font-bold mb-2">Attendance Marked!</h3>
-                      <p className="text-lg mb-1">Student: {lastAttendance.student}</p>
-                      <p className="text-sm opacity-90">
-                        {lastAttendance.time} | {lastAttendance.date}
-                      </p>
+                  <div className="absolute top-4 right-4 bg-green-500 bg-opacity-95 text-white px-4 py-3 rounded-lg shadow-lg max-w-xs">
+                    <div className="flex items-center gap-2 mb-1">
+                      <CheckCircle className="w-5 h-5" />
+                      <span className="font-semibold text-sm">Attendance Marked!</span>
                     </div>
+                    <p className="text-sm mb-1">Student: {lastAttendance.student}</p>
+                    <p className="text-xs opacity-90">
+                      {lastAttendance.time} | {lastAttendance.date}
+                    </p>
                   </div>
                 )}
 
@@ -412,19 +420,10 @@ export default function Home() {
         {/* System Info & Admin Link */}
         <div className="text-center mt-8 space-y-4">
           <div className="text-sm text-gray-500">
-            <p>System continuously scans for faces every 2 seconds</p>
+            <p>System continuously scans for faces in real-time</p>
             <p>Attendance is marked automatically upon successful recognition</p>
           </div>
           <div className="flex gap-4 justify-center">
-            {!intervalRef.current && (
-              <button
-                onClick={startContinuousRecognition}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                <Camera className="w-4 h-4" />
-                Resume Scanning
-              </button>
-            )}
             <a
               href="/admin"
               className="inline-flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"

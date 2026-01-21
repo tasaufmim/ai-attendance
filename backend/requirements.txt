@@ -10,18 +10,8 @@ python-multipart>=0.0.6
 # Data Processing
 numpy>=1.24.0
 
-# ===== AI/ML DEPENDENCIES (Face Recognition) =====
-# PyTorch CPU-only versions (much faster Railway builds)
-torch>=2.0.0 --index-url https://download.pytorch.org/whl/cpu
-torchvision>=0.15.0 --index-url https://download.pytorch.org/whl/cpu
-
-# Face recognition models
-insightface>=0.7.3
-ultralytics>=8.0.0  # For YOLOv8 face detection (standard model)
-# mediapipe>=0.10.0  # For face detection (alternative)
-
-# Computer vision
-opencv-python>=4.8.0
+# ===== DATA PROCESSING =====
+# Image processing (basic operations only)
 Pillow>=10.0.0
 
 # ===== GPU SUPPORT (Optional - uncomment if you have CUDA GPU) =====
