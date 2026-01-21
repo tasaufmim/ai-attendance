@@ -10,6 +10,8 @@ import { FaceRegistration } from '../../components/FaceRegistration';
 import AuthWrapper from '@/components/AuthWrapper';
 
 function FaceRecognitionContent() {
+  // Disable static generation for this page due to client-side hooks
+  const dynamic = 'force-client';
   const router = useRouter();
   const searchParams = useSearchParams();
   const videoRef = useRef<HTMLVideoElement>(null);
