@@ -47,7 +47,8 @@ class RecognitionResult(BaseModel):
     student_name: Optional[str] = None
     confidence: float
     recognized: bool
-    bbox: Optional[List[int]] = None  # [x1, y1, x2, y2]
+    bbox: Optional[List[int]] = None  # [x1, y1, x2, y2] - for embedding
+    display_bbox: Optional[List[int]] = None  # [x1, y1, x2, y2] - for display
 
 class MultiRecognitionResult(BaseModel):
     results: List[RecognitionResult]
@@ -128,9 +129,31 @@ async def recognize_face(file: UploadFile = File(...)):
         # Detect faces to get bbox
         faces = face_service.detect_faces(image_np)
         bbox = faces[0]['bbox'] if faces else None
-        print(f"DEBUG: Detected faces: {len(faces)}, bbox: {bbox}")  # Debug: bbox detection
 
-        # Perform recognition
+        # Create display bbox (tighter for better visuals)
+        display_bbox = None
+        if bbox:
+            # Make display bbox tighter - reduce margins for clearer visuals
+            x1, y1, x2, y2 = bbox
+            width = x2 - x1
+            height = y2 - y1
+
+            # Reduce bbox by 15% on each side for tighter display
+            margin_x = int(width * 0.15)
+            margin_y = int(height * 0.15)
+
+            display_x1 = max(0, x1 + margin_x)
+            display_y1 = max(0, y1 + margin_y)
+            display_x2 = x2 - margin_x
+            display_y2 = y2 - margin_y
+
+            # Ensure minimum size
+            if display_x2 > display_x1 and display_y2 > display_y1:
+                display_bbox = [display_x1, display_y1, display_x2, display_y2]
+
+        print(f"DEBUG: Detected faces: {len(faces)}, bbox: {bbox}, display_bbox: {display_bbox}")  # Debug: bbox detection
+
+        # Perform recognition (uses the embedding bbox)
         student_id, student_name, confidence = face_service.recognize_face(image_np)
         print(f"DEBUG: Recognition result - id: {student_id}, name: {student_name}, conf: {confidence}")  # Debug: recognition result
 
@@ -145,7 +168,8 @@ async def recognize_face(file: UploadFile = File(...)):
                     student_name=student_name,
                     confidence=confidence,
                     recognized=True,
-                    bbox=bbox
+                    bbox=bbox,
+                    display_bbox=display_bbox
                 )
 
             # Mark attendance automatically
@@ -165,13 +189,15 @@ async def recognize_face(file: UploadFile = File(...)):
                 student_name=student_name,
                 confidence=confidence,
                 recognized=True,
-                bbox=bbox
+                bbox=bbox,
+                display_bbox=display_bbox
             )
         else:
             return RecognitionResult(
                 confidence=confidence,
                 recognized=False,
-                bbox=bbox
+                bbox=bbox,
+                display_bbox=display_bbox
             )
 
     except Exception as e:

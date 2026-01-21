@@ -85,34 +85,23 @@ class FaceRecognitionService:
                     # Convert to integers
                     x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
 
-                    # For person detections, estimate face region proportionally
+                    # For person detections, use person bbox directly (person detection already gives good face region)
                     if class_id == 0:  # Person class
-                        # Estimate face dimensions based on human proportions
-                        person_width = x2 - x1
-                        person_height = y2 - y1
+                        # Person bbox is already a good face region - just ensure it's within image bounds
+                        final_bbox = [x1, y1, x2, y2]
+                        final_bbox[0] = max(0, final_bbox[0])                    # x1 >= 0
+                        final_bbox[1] = max(0, final_bbox[1])                    # y1 >= 0
+                        final_bbox[2] = min(w, final_bbox[2])                    # x2 <= image_width
+                        final_bbox[3] = min(h, final_bbox[3])                    # y2 <= image_height
 
-                        # Face height is typically larger - using 3x the proportional size
-                        face_height = max(80, int((person_height * 3) / 7))  # 3x taller
-
-                        # Face width is about 0.8 times face height (proportional)
-                        face_width = int(face_height * 0.8)
-
-                        # Face starts about 1/20 down from person top
-                        face_y_start = y1 + int(person_height / 20)
-
-                        # Face is horizontally centered
-                        face_x_center = (x1 + x2) // 2
-                        face_x1 = max(x1, face_x_center - face_width // 2)
-                        face_x2 = min(x2, face_x_center + face_width // 2)
-
-                        # Ensure face bbox is within person bbox
-                        face_y2 = min(y2, face_y_start + face_height)
-
-                        faces.append({
-                            'bbox': [face_x1, face_y_start, face_x2, face_y2],  # Estimated face region
-                            'confidence': float(confidence),
-                            'class': class_id
-                        })
+                        # Ensure minimum size
+                        if final_bbox[2] - final_bbox[0] >= 50 and final_bbox[3] - final_bbox[1] >= 50:
+                            print(f"  Person bbox: {final_bbox}")  # Debug: show person bbox
+                            faces.append({
+                                'bbox': final_bbox,  # Person bbox as face region
+                                'confidence': float(confidence),
+                                'class': class_id
+                            })
                     else:
                         # For non-person detections, apply size/aspect filtering
                         face_width = x2 - x1
@@ -203,22 +192,34 @@ class FaceRecognitionService:
             True if registration successful, False otherwise
         """
         embeddings = []
+        total_images = len(face_images)
 
-        for image in face_images:
+        print(f"Starting face registration for student {student_name} (ID: {student_id}) with {total_images} photos")
+
+        for i, image in enumerate(face_images, 1):
+            print(f"Processing photo {i}/{total_images} for student {student_id}...")
+
             # Detect faces
             faces = self.detect_faces(image)
+            print(f"  Detected faces: {len(faces)}")
 
             if len(faces) == 1:
+                print(f"  Single face detected, bbox: {faces[0]['bbox']}")
                 # Extract embedding
                 embedding = self.extract_embedding(image, faces[0]['bbox'])
                 if embedding is not None:
                     embeddings.append(embedding)
+                    print(f"  Embedding extracted successfully")
+                else:
+                    print(f"  Embedding extraction failed")
             elif len(faces) > 1:
-                print(f"Multiple faces detected in image for student {student_id}, skipping")
+                print(f"  Multiple faces detected ({len(faces)}), skipping this photo")
                 continue
             else:
-                print(f"No faces detected in image for student {student_id}, skipping")
+                print(f"  No faces detected, skipping this photo")
                 continue
+
+        print(f"Registration summary for student {student_id}: {len(embeddings)}/{total_images} photos processed successfully")
 
         if len(embeddings) >= 3:  # Require at least 3 good photos
             # Compute average embedding
@@ -232,7 +233,7 @@ class FaceRecognitionService:
             print(f"Successfully registered student {student_name} (ID: {student_id}) with {len(embeddings)} photos")
             return True
         else:
-            print(f"Insufficient good photos for student {student_id}. Got {len(embeddings)}, need at least 3.")
+            print(f"Registration failed for student {student_id}. Got {len(embeddings)} valid photos, need at least 3.")
             return False
 
     def recognize_face(self, image: np.ndarray, threshold: float = 0.6) -> Tuple[Optional[int], Optional[str], float]:

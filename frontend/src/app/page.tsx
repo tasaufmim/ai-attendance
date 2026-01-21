@@ -11,7 +11,8 @@ interface RecognitionResult {
   student_name: string | null;
   confidence: number;
   recognized: boolean;
-  bbox?: number[];
+  bbox?: number[];        // For embedding (larger)
+  display_bbox?: number[]; // For display (tighter)
 }
 
 interface BBox {
@@ -141,14 +142,15 @@ export default function Home() {
           console.log('API Response:', data); // Debug: log full response
           setRecognitionResult(data);
 
-          // Draw bounding box if available
-          if (data.bbox) {
-            console.log('Drawing bbox:', data.bbox); // Debug: log bbox data
+          // Draw bounding box if available (prefer display_bbox for visual feedback)
+          const bboxForDisplay = data.display_bbox || data.bbox;
+          if (bboxForDisplay) {
+            console.log('Drawing bbox:', bboxForDisplay, '(display_bbox preferred)'); // Debug: log bbox data
             const bbox: BBox = {
-              x1: data.bbox[0],
-              y1: data.bbox[1],
-              x2: data.bbox[2],
-              y2: data.bbox[3]
+              x1: bboxForDisplay[0],
+              y1: bboxForDisplay[1],
+              x2: bboxForDisplay[2],
+              y2: bboxForDisplay[3]
             };
             const faces = [{
               name: data.student_name || 'Unknown',
