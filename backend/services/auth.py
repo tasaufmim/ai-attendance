@@ -4,8 +4,8 @@ import secrets
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import bcrypt
-from ..models.user import User
-from ..models.session import Session
+from models.user import User
+from models.session import Session
 from services.email import email_service
 from services.database import get_database, USERS_COLLECTION, SESSIONS_COLLECTION
 from pymongo.errors import DuplicateKeyError
