@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertCircle, CheckCircle, Upload, Users, FileText, Plus, Camera, Trash2, RotateCcw } from 'lucide-react';
+import AuthWrapper from '@/components/AuthWrapper';
 
 interface Student {
   id: number;
@@ -336,8 +337,9 @@ export default function AdminPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-7xl mx-auto">
+    <AuthWrapper>
+      <div className="min-h-screen bg-gray-50 p-4">
+        <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">
@@ -678,5 +680,6 @@ export default function AdminPage() {
         </div>
       </div>
     </div>
+    </AuthWrapper>
   );
 }

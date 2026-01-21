@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Webcam, UserCheck, UserPlus, Loader2, Camera, AlertCircle } from 'lucide-react';
 import { FaceRegistration } from '../../components/FaceRegistration';
+import AuthWrapper from '@/components/AuthWrapper';
 
 export default function FaceRecognitionPage() {
   const router = useRouter();
@@ -204,8 +205,9 @@ export default function FaceRecognitionPage() {
   }, []);
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="max-w-4xl mx-auto">
+    <AuthWrapper>
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
@@ -428,5 +430,6 @@ export default function FaceRecognitionPage() {
         )}
       </div>
     </div>
+    </AuthWrapper>
   );
 }

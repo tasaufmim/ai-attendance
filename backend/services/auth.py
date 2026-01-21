@@ -3,14 +3,12 @@ from typing import Optional, Dict, Any
 import secrets
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 import bcrypt
 from models.user import User
 from models.session import Session
 from services.email import email_service
-from services.database import get_db
+from services.database import get_database, USERS_COLLECTION, SESSIONS_COLLECTION
+from pymongo.errors import DuplicateKeyError
 import os
 
 # JWT Configuration
@@ -54,199 +52,315 @@ class AuthService:
         encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
         return encoded_jwt
 
-    async def authenticate_user(self, db: AsyncSession, email: str, password: str) -> Optional[User]:
+    async def authenticate_user(self, email: str, password: str) -> Optional[User]:
         """Authenticate user with email and password"""
         try:
-            result = await db.execute(
-                select(User).where(User.email == email)
-            )
-            user = result.scalar_one_or_none()
-            
-            if not user or not self.verify_password(password, user.hashed_password):
+            db = get_database()
+            user_doc = await db[USERS_COLLECTION].find_one({"email": email})
+
+            if not user_doc:
                 return None
-            
+
+            user = User.from_dict(user_doc)
+
+            if not user.hashed_password or not self.verify_password(password, user.hashed_password):
+                return None
+
             if not user.is_active:
                 return None
-                
+
             return user
         except Exception as e:
             print(f"Authentication error: {e}")
             return None
 
-    async def get_user_by_email(self, db: AsyncSession, email: str) -> Optional[User]:
+    async def get_user_by_email(self, email: str) -> Optional[User]:
         """Get user by email"""
         try:
-            result = await db.execute(
-                select(User).where(User.email == email)
-            )
-            return result.scalar_one_or_none()
+            db = get_database()
+            user_doc = await db[USERS_COLLECTION].find_one({"email": email})
+            if user_doc:
+                return User.from_dict(user_doc)
+            return None
         except Exception as e:
             print(f"Error getting user by email: {e}")
             return None
 
-    async def get_user_by_id(self, db: AsyncSession, user_id: int) -> Optional[User]:
+    async def get_user_by_id(self, user_id: str) -> Optional[User]:
         """Get user by ID"""
         try:
-            result = await db.execute(
-                select(User).where(User.id == user_id)
-            )
-            return result.scalar_one_or_none()
+            db = get_database()
+            user_doc = await db[USERS_COLLECTION].find_one({"_id": user_id})
+            if user_doc:
+                return User.from_dict(user_doc)
+            return None
         except Exception as e:
             print(f"Error getting user by ID: {e}")
             return None
 
-    async def create_user(self, db: AsyncSession, email: str, name: str, password: str, is_admin: bool = False) -> User:
+    async def create_user(self, email: str, name: str, password: str = None, is_admin: bool = False, provider: str = None, provider_id: str = None, provider_data: dict = None) -> User:
         """Create a new user"""
         try:
+            db = get_database()
+
             # Check if user already exists
-            existing_user = await self.get_user_by_email(db, email)
+            existing_user = await self.get_user_by_email(email)
             if existing_user:
                 raise ValueError("Email already registered")
-            
-            # Create user (User model will hash the password)
+
+            # Create user (User model will hash the password if provided)
             user = User(
                 email=email,
                 name=name,
-                password=password,  # Pass raw password, User model will hash it
-                is_admin=is_admin
+                hashed_password=User.hash_password(password) if password else None,
+                is_admin=is_admin,
+                provider=provider,
+                provider_id=provider_id,
+                provider_data=provider_data
             )
-            
-            # Generate email verification token
-            verification_token = email_service.generate_token()
-            user.email_verification_token = verification_token
-            
-            db.add(user)
-            await db.commit()
-            await db.refresh(user)
-            
-            # Send verification email
-            await email_service.send_verification_email(email, verification_token)
-            
+
+            # Generate email verification token for password-based users
+            if password and not provider:
+                verification_token = email_service.generate_token()
+                user.email_verification_token = verification_token
+                # Send verification email
+                await email_service.send_verification_email(email, verification_token)
+            elif provider:
+                # OAuth users are automatically verified
+                user.email_verified = True
+
+            # Insert into database
+            user_dict = user.dict(by_alias=True)
+            result = await db[USERS_COLLECTION].insert_one(user_dict)
+            user.id = str(result.inserted_id)
+
             return user
+        except DuplicateKeyError:
+            raise ValueError("Email already registered")
         except Exception as e:
-            await db.rollback()
+            print(f"User creation error: {e}")
             raise e
 
-    async def verify_email(self, db: AsyncSession, token: str) -> bool:
+    async def verify_email(self, token: str) -> bool:
         """Verify user email with token"""
         try:
-            result = await db.execute(
-                select(User).where(User.email_verification_token == token)
-            )
-            user = result.scalar_one_or_none()
-            
-            if not user:
+            db = get_database()
+            user_doc = await db[USERS_COLLECTION].find_one({"email_verification_token": token})
+
+            if not user_doc:
                 return False
-            
-            user.email_verified = True
-            user.email_verification_token = None
-            await db.commit()
-            
+
+            # Update user
+            await db[USERS_COLLECTION].update_one(
+                {"_id": user_doc["_id"]},
+                {
+                    "$set": {
+                        "email_verified": True,
+                        "email_verification_token": None,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+
             return True
         except Exception as e:
-            await db.rollback()
             print(f"Email verification error: {e}")
             return False
 
-    async def request_password_reset(self, db: AsyncSession, email: str) -> bool:
+    async def request_password_reset(self, email: str) -> bool:
         """Request password reset by sending email"""
         try:
-            user = await self.get_user_by_email(db, email)
+            user = await self.get_user_by_email(email)
             if not user:
                 # Don't reveal if user exists or not
                 return True
-            
+
             # Generate reset token
             reset_token = email_service.generate_token()
-            user.password_reset_token = reset_token
-            user.password_reset_expires = datetime.utcnow() + timedelta(hours=1)
-            
-            await db.commit()
-            
+            expires_at = datetime.utcnow() + timedelta(hours=1)
+
+            db = get_database()
+            await db[USERS_COLLECTION].update_one(
+                {"_id": user.id},
+                {
+                    "$set": {
+                        "password_reset_token": reset_token,
+                        "password_reset_expires": expires_at,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+
             # Send reset email
             await email_service.send_password_reset_email(email, reset_token)
-            
+
             return True
         except Exception as e:
-            await db.rollback()
             print(f"Password reset request error: {e}")
             return False
 
-    async def reset_password(self, db: AsyncSession, token: str, new_password: str) -> bool:
+    async def reset_password(self, token: str, new_password: str) -> bool:
         """Reset password with token"""
         try:
-            result = await db.execute(
-                select(User).where(User.password_reset_token == token)
-            )
-            user = result.scalar_one_or_none()
-            
-            if not user or user.password_reset_expires < datetime.utcnow():
+            db = get_database()
+            user_doc = await db[USERS_COLLECTION].find_one({
+                "password_reset_token": token,
+                "password_reset_expires": {"$gt": datetime.utcnow()}
+            })
+
+            if not user_doc:
                 return False
-            
+
             # Update password
-            user.hashed_password = self.get_password_hash(new_password)
-            user.password_reset_token = None
-            user.password_reset_expires = None
-            
-            await db.commit()
-            
+            hashed_password = self.get_password_hash(new_password)
+            await db[USERS_COLLECTION].update_one(
+                {"_id": user_doc["_id"]},
+                {
+                    "$set": {
+                        "hashed_password": hashed_password,
+                        "password_reset_token": None,
+                        "password_reset_expires": None,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+
             return True
         except Exception as e:
-            await db.rollback()
             print(f"Password reset error: {e}")
             return False
 
-    async def create_session(self, db: AsyncSession, user_id: int, token: str) -> Session:
+    async def create_session(self, user_id: str, token: str) -> Session:
         """Create a new session"""
         try:
+            db = get_database()
             expires_at = datetime.utcnow() + self.refresh_token_expire
-            
+
             session = Session(
                 user_id=user_id,
                 token=token,
                 expires_at=expires_at
             )
-            
-            db.add(session)
-            await db.commit()
-            await db.refresh(session)
-            
+
+            # Insert into database
+            session_dict = session.dict(by_alias=True)
+            result = await db[SESSIONS_COLLECTION].insert_one(session_dict)
+            session.id = str(result.inserted_id)
+
             return session
         except Exception as e:
-            await db.rollback()
+            print(f"Session creation error: {e}")
             raise e
 
-    async def get_session(self, db: AsyncSession, token: str) -> Optional[Session]:
+    async def get_session(self, token: str) -> Optional[Session]:
         """Get session by token"""
         try:
-            result = await db.execute(
-                select(Session).where(Session.token == token)
-            )
-            session = result.scalar_one_or_none()
-            
-            if session and session.is_expired():
-                await db.delete(session)
-                await db.commit()
+            db = get_database()
+            session_doc = await db[SESSIONS_COLLECTION].find_one({"token": token})
+
+            if not session_doc:
                 return None
-            
+
+            session = Session.from_dict(session_doc)
+
+            if session.is_expired():
+                await db[SESSIONS_COLLECTION].delete_one({"_id": session.id})
+                return None
+
             return session
         except Exception as e:
             print(f"Error getting session: {e}")
             return None
 
-    async def delete_session(self, db: AsyncSession, token: str) -> bool:
+    async def delete_session(self, token: str) -> bool:
         """Delete session by token"""
         try:
-            session = await self.get_session(db, token)
-            if session:
-                await db.delete(session)
-                await db.commit()
-                return True
-            return False
+            db = get_database()
+            result = await db[SESSIONS_COLLECTION].delete_one({"token": token})
+            return result.deleted_count > 0
         except Exception as e:
-            await db.rollback()
             print(f"Error deleting session: {e}")
             return False
+
+    async def get_or_create_oauth_user(self, provider: str, provider_id: str, email: str, name: str, provider_data: dict = None) -> User:
+        """Get or create user from OAuth provider"""
+        try:
+            db = get_database()
+
+            # Try to find existing user by provider and provider_id
+            user_doc = await db[USERS_COLLECTION].find_one({
+                "provider": provider,
+                "provider_id": provider_id
+            })
+
+            if user_doc:
+                user = User.from_dict(user_doc)
+                # Update user data if needed
+                if provider_data:
+                    await db[USERS_COLLECTION].update_one(
+                        {"_id": user.id},
+                        {
+                            "$set": {
+                                "provider_data": provider_data,
+                                "updated_at": datetime.utcnow()
+                            }
+                        }
+                    )
+                    user.provider_data = provider_data
+                return user
+
+            # Check if email already exists with different provider
+            existing_email_user = await self.get_user_by_email(email)
+            if existing_email_user:
+                # Link OAuth account to existing user
+                await db[USERS_COLLECTION].update_one(
+                    {"_id": existing_email_user.id},
+                    {
+                        "$set": {
+                            "provider": provider,
+                            "provider_id": provider_id,
+                            "provider_data": provider_data,
+                            "updated_at": datetime.utcnow()
+                        }
+                    }
+                )
+                existing_email_user.provider = provider
+                existing_email_user.provider_id = provider_id
+                existing_email_user.provider_data = provider_data
+                return existing_email_user
+
+            # Create new OAuth user
+            user = await self.create_user(
+                email=email,
+                name=name,
+                password=None,  # OAuth users don't have passwords
+                provider=provider,
+                provider_id=provider_id,
+                provider_data=provider_data
+            )
+
+            return user
+        except Exception as e:
+            print(f"OAuth user creation error: {e}")
+            raise e
+
+    async def authenticate_oauth_user(self, provider: str, provider_id: str) -> Optional[User]:
+        """Authenticate OAuth user"""
+        try:
+            db = get_database()
+            user_doc = await db[USERS_COLLECTION].find_one({
+                "provider": provider,
+                "provider_id": provider_id
+            })
+
+            if user_doc:
+                user = User.from_dict(user_doc)
+                if user.is_active:
+                    return user
+            return None
+        except Exception as e:
+            print(f"OAuth authentication error: {e}")
+            return None
 
 # Global auth service instance
 auth_service = AuthService()

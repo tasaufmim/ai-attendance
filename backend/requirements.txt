@@ -7,6 +7,18 @@ pydantic>=2.5.0
 # File Uploads (required for FastAPI file handling)
 python-multipart>=0.0.6
 
+# Authentication & Security
+bcrypt>=4.0.0
+passlib>=1.7.4
+python-jose[cryptography]>=3.3.0
+# Email functionality
+aiosmtplib>=2.0.0
+
+# Database
+motor>=3.3.0
+pymongo>=4.6.0
+dnspython>=2.4.0
+
 # Data Processing
 numpy>=1.24.0
 

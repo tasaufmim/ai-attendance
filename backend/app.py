@@ -10,6 +10,12 @@ import sys
 import os
 from datetime import datetime
 
+# Import routes and services
+from routes import auth
+from services import database
+# Import models
+from models import user, session
+
 # AI service integration
 sys.path.append(os.path.join(os.path.dirname(__file__), 'ai-service'))
 from face_recognition import get_face_service
@@ -65,11 +71,17 @@ last_attendance_times = {}
 # Global AI service
 face_service = get_face_service()
 
+# Include routers
+app.include_router(auth.router, prefix="/auth", tags=["authentication"])
+
 # Initialize face recognition service on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup"""
     print("🚀 Initializing AI Attendance System...")
+    # Initialize database
+    await database.init_db()
+    print("Database initialized successfully")
     print("Backend services initialized successfully with real AI models")
 
 # Routes
