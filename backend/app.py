@@ -119,7 +119,7 @@ async def register_face_embedding(registration: FaceRegistration):
     else:
         raise HTTPException(status_code=400, detail="Face registration failed")
 
-@app.post("/recognize-face", response_model=RecognitionResult)
+@app.post("/face/recognize", response_model=RecognitionResult)
 async def recognize_face_embedding(recognition: FaceRecognition):
     """Recognize a face from embedding sent by face-api.js"""
     student_id, student_name, confidence = face_service.recognize_face_from_embedding(
@@ -160,6 +160,11 @@ async def recognize_face_embedding(recognition: FaceRecognition):
         confidence=confidence,
         recognized=recognized
     )
+
+@app.post("/recognize-face", response_model=RecognitionResult)
+async def recognize_face_embedding_legacy(recognition: FaceRecognition):
+    """Legacy endpoint for face recognition (deprecated, use /face/recognize)"""
+    return await recognize_face_embedding(recognition)
 
 @app.get("/attendance/")
 async def get_attendance():
