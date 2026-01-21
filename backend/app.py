@@ -11,10 +11,10 @@ import os
 from datetime import datetime
 
 # Import routes and services
-from routes import auth
-from services import database
+from .routes import auth
+from .services import database
 # Import models
-from models import user, session
+from .models import user, session
 
 # AI service integration
 sys.path.append(os.path.join(os.path.dirname(__file__), 'ai-service'))

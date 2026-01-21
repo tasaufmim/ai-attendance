@@ -5,8 +5,8 @@ from typing import Optional, List
 from datetime import datetime
 import os
 
-from services.auth import auth_service
-from services.email import email_service
+from ..services.auth import auth_service
+from ..services.email import email_service
 
 router = APIRouter()
 security = HTTPBearer()
