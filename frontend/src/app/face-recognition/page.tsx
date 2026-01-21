@@ -9,7 +9,7 @@ import { Webcam, UserCheck, UserPlus, Loader2, Camera, AlertCircle } from 'lucid
 import { FaceRegistration } from '../../components/FaceRegistration';
 import AuthWrapper from '@/components/AuthWrapper';
 
-export default function FaceRecognitionPage() {
+function FaceRecognitionContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -431,5 +431,13 @@ export default function FaceRecognitionPage() {
       </div>
     </div>
     </AuthWrapper>
+  );
+}
+
+export default function FaceRecognitionPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <FaceRecognitionContent />
+    </Suspense>
   );
 }
