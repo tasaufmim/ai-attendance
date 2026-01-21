@@ -229,7 +229,7 @@ export default function Home() {
   // Start face detection loop
   useEffect(() => {
     if (modelsLoaded) {
-      const interval = setInterval(detectFaces, 100); // 10 FPS detection
+      const interval = setInterval(detectFaces, 200); // 10 FPS detection
       return () => clearInterval(interval);
     }
   }, [modelsLoaded, detectFaces]);
