@@ -6,7 +6,7 @@ A complete face recognition-based attendance tracking system with web interface.
 
 - **Frontend**: Next.js 16 with React 19, TypeScript, Tailwind CSS
 - **Backend**: FastAPI with Python, automatic API documentation
-- **AI Service**: Face recognition using InsightFace and YOLOv8
+- **AI Service**: Browser-based face recognition using face-api.js
 - **Database**: In-memory (easily replaceable with PostgreSQL/MySQL)
 
 ## 🚀 Quick Start

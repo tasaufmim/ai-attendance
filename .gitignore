@@ -82,7 +82,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # ===== AI/ML =====
-# Downloaded AI models (YOLO, InsightFace, etc.)
+# Downloaded AI models (face-api.js, etc.)
 models/
 *.pt
 *.pth
