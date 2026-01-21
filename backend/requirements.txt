@@ -31,8 +31,6 @@ numpy>=1.24.0
 # ===== DATA PROCESSING =====
 # Image processing (basic operations only)
 Pillow>=10.0.0
-opencv-python>=4.8.0
-face-recognition>=1.3.0
 
 # ===== GPU SUPPORT (Optional - uncomment if you have CUDA GPU) =====
 # For GPU acceleration, uncomment these and comment out CPU versions above:
